@@ -1,0 +1,5 @@
+.virtual_documents
+__pycache__
+*.tar.gz
+connect.sh
+.ipynb_checkpoints

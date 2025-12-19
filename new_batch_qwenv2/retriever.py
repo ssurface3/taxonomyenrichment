@@ -19,7 +19,7 @@ class EmbeddingRetriever:
             convert_to_tensor=True, 
             normalize_embeddings=True,
             show_progress_bar=True,
-            batch_size=220 # almost OOM for t4 , only change if using better than t4
+            batch_size=300 # almost OOM for t4 , only change if using better than t4
         )
 
     def get_candidates_batch(self, queries, k=50):

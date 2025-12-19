@@ -29,4 +29,4 @@ def convert_to_baseline_format(json_path, output_name='verbs.tsv', zip_name='sub
         zf.write(output_name)
     print("Ready to submit!")
 
-convert_to_baseline_format('/kaggle/working/submission_verbs.json', 'verbs.tsv', 'submission_verbs_BASELINE.zip')
+convert_to_baseline_format('/kaggle/working/output/submission_nouns_private.json', 'nouns.tsv', 'submission_nouns_private_1.zip')

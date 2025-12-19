@@ -35,11 +35,31 @@ class QwenJudge:
             
             valid_ids_batch.append(current_valid_ids)
 
+            # Create a static string of examples (You can pick these from training_verbs.tsv)
+            FEW_SHOT_EXAMPLES = """
+            Example 1:
+            Word: бежать (run)
+            Context: Он бежит марафон.
+            Options:
+            1. ДВИГАТЬСЯ (MOVE) - ID: 123-V
+            2. СПОРТ (SPORT) - ID: 456-N
+            3. БЫСТРО (FAST) - ID: 789-A
+            Correct Answer: 123-V (Because 'Move' is the parent action of 'Run')
+
+            Example 2:
+            Word: шептать (whisper)
+            Context: Она шептала секрет.
+            Options:
+            1. ГОВОРИТЬ (SPEAK) - ID: 111-V
+            2. ТИХО (QUIET) - ID: 222-A
+            Correct Answer: 111-V
+            """
+
+            # Update your prompt construction
             messages = [
-                {"role": "system", "content": "Select the most specific hypernym (parent) ID. Output ONLY the ID."},
-                {"role": "user", "content": f"Word: {orphan}\nOptions:\n{options_text}\nAnswer with ID only."}
+                {"role": "system", "content": "You are a taxonomy expert. Identify the Hypernym (Parent)."},
+                {"role": "user", "content": f"{FEW_SHOT_EXAMPLES}\n\nTarget Word: {orphan}\nOptions:\n{options_text}\nAnswer with ID only."}
             ]
-            
             text = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
             prompts.append(text)
 

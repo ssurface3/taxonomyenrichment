@@ -17,7 +17,7 @@ def get_args():
     parser.add_argument("--data_dir", type=str, default="taxonomy-enrichment/data")
     parser.add_argument("--zip_name", type=str, default="ruwordnet.zip")
     parser.add_argument("--mode", type=str, choices=["nouns", "verbs"], required=True)
-    parser.add_argument("--phase", type=str, choices=["public", "private"], default="private")
+    parser.add_argument("--phase", type=str, choices=["public", "private"], default="public")
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--top_k_retrieve", type=int, default=100)
     parser.add_argument("--top_k_rerank", type=int, default=10)
@@ -34,8 +34,48 @@ def get_ancestors(node_id, df_relations, max_depth=10):
         curr = parents.iloc[0]['parent_id']
         chain.append(curr)
     return chain
+# def get_wiktionary_def(word):
+#     try:
+#         url = f"https://ru.wiktionary.org/wiki/{word}"
+#         # Timeout to prevent hanging
+#         response = requests.get(url, timeout=2)
+#         if response.status_code == 200:
+#             text = response.text
+#             if "Значение</h3>" in text:
+#                 start = text.find("Значение</h3>")
+#                 end = text.find("</ol>", start)
+#                 snippet = text[start:end]
+#                 clean = re.sub('<[^<]+?>', '', snippet).strip()
+#                 lines = [l.strip() for l in clean.split('\n') if len(l.strip()) > 5]
+#                 # Return the first real definition found
+#                 for l in lines:
+#                     if "Значение" not in l: return l
+#     except:
+#         pass
+#     return None
+def expand_candidates_with_parents(candidates_batch, df_relations, df_search):
+    id_to_name = df_search.set_index('id')['name'].to_dict()
+    batch_results = []
+    
+    for candidates in candidates_batch:
+        parent_counts = {}
+        unique_map = {}
+        
+        for sid, name in candidates:
+            unique_map[sid] = name
+            parents = df_relations[df_relations['child_id'] == sid]
+            for pid in parents['parent_id'].values:
+                if pid in id_to_name:
+                    parent_counts[pid] = parent_counts.get(pid, 0) + 1
+                    unique_map[pid] = id_to_name[pid]
+        
+        ranked_ids = sorted(unique_map.keys(), key=lambda x: parent_counts.get(x, 0), reverse=True)
+        final_list = [(pid, unique_map[pid]) for pid in ranked_ids]
+        batch_results.append(final_list[:50])
+        
+    return batch_results
 
-def run_sanity_check(df_test, judge, retriever, reranker, df_search):
+def run_sanity_check(df_test, judge, retriever, reranker, df_search, df_relations):
     print("\n" + "="*60)
     print("SANITY CHECK")
     
@@ -50,8 +90,11 @@ def run_sanity_check(df_test, judge, retriever, reranker, df_search):
     queries = [f"query: {d}" for d in defs]
     cands_wide = retriever.get_candidates_batch(queries, k=50)
     
+    print("Expanding Graph...")
+    cands_expanded = expand_candidates_with_parents(cands_wide, df_relations, df_search)
+
     print("Reranking...")
-    cands_refined = reranker.rerank_batch(defs, cands_wide, top_k=5)
+    cands_refined = reranker.rerank_batch(defs, cands_expanded, top_k=5)
     
     print("Selecting Best...")
     best_ids = judge.select_best_candidate_batch(orphans, cands_refined)
@@ -93,12 +136,16 @@ def main():
 
         xml_filter = ".N.xml" if args.mode == "nouns" else ".V.xml"
         print(f"Loading Graph with filter: {xml_filter}")
+        
         df_search, df_relations = load_graph_from_zip(zip_full_path, xml_filter=xml_filter)
         
         target_suffix = "N" if args.mode == "nouns" else "V"
         if not df_search.iloc[0]['id'].endswith(target_suffix):
             print(f"Filtering database for {target_suffix}...")
             df_search = df_search[df_search['id'].str.endswith(target_suffix)].copy()
+
+        if len(df_search) == 0:
+            raise ValueError("Database is empty after filtering!")
 
         print(f"Loading Test File: {test_file_path}")
         
@@ -115,17 +162,13 @@ def main():
 
         df_test['context'] = df_test['context'].fillna("").astype(str)
         
-        print("[1/3] Loading Qwen...")
+        print("Loading Models...")
         judge = QwenJudge() 
-        
-        print("[2/3] Loading Retriever...")
         retriever = EmbeddingRetriever(df_search) 
-        
-        print("[3/3] Loading Reranker...")
         reranker = CrossEncoderReranker() 
 
         if not args.skip_check:
-            run_sanity_check(df_test, judge, retriever, reranker, df_search)
+            run_sanity_check(df_test, judge, retriever, reranker, df_search, df_relations)
 
         submission = {}
         all_orphans = df_test['text'].tolist()
@@ -142,7 +185,9 @@ def main():
             search_queries = [f"query: {d}" for d in batch_definitions]
             candidates_wide = retriever.get_candidates_batch(search_queries, k=args.top_k_retrieve)
             
-            candidates_refined = reranker.rerank_batch(batch_definitions, candidates_wide, top_k=args.top_k_rerank)
+            candidates_expanded = expand_candidates_with_parents(candidates_wide, df_relations, df_search)
+            
+            candidates_refined = reranker.rerank_batch(batch_definitions, candidates_expanded, top_k=args.top_k_rerank)
             
             best_ids = judge.select_best_candidate_batch(batch_orphans, candidates_refined)
             
